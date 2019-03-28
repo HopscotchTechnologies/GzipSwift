@@ -157,7 +157,6 @@ extension Data {
     /// - Returns: Gzip-compressed `Data` object.
     /// - Throws: `GzipError`
     public func gzipped(level: CompressionLevel = .defaultCompression) throws -> Data {
-        
         guard !self.isEmpty else {
             return Data()
         }
@@ -165,35 +164,34 @@ extension Data {
         let contiguousData = self.withUnsafeBytes { Data(bytes: $0, count: self.count) }
         var stream = contiguousData.createZStream()
         var status: Int32
-        
+
         status = deflateInit2_(&stream, level.rawValue, Z_DEFLATED, MAX_WBITS + 16, MAX_MEM_LEVEL, Z_DEFAULT_STRATEGY, ZLIB_VERSION, Int32(DataSize.stream))
-        
+
         guard status == Z_OK else {
             // deflateInit2 returns:
             // Z_VERSION_ERROR  The zlib library version is incompatible with the version assumed by the caller.
             // Z_MEM_ERROR      There was not enough memory.
             // Z_STREAM_ERROR   A parameter is invalid.
-            
+
             throw GzipError(code: status, msg: stream.msg)
         }
-        
+
         var data = Data(capacity: DataSize.chunk)
+        // create buffer
+        var compressBuffer = [Bytef](repeating: 0, count: DataSize.chunk)
+        // new part of the while loop
         while stream.avail_out == 0 {
-            if Int(stream.total_out) >= data.count {
-                data.count += DataSize.chunk
-            }
-            
-            data.withUnsafeMutableBytes { (bytes: UnsafeMutablePointer<Bytef>) in
-                stream.next_out = bytes.advanced(by: Int(stream.total_out))
-            }
-            stream.avail_out = uInt(data.count) - uInt(stream.total_out)
-            
+            stream.next_out = UnsafeMutableRawPointer(mutating: compressBuffer).assumingMemoryBound(to: Bytef.self)
+            stream.avail_out = uint(DataSize.chunk)
+
             deflate(&stream, Z_FINISH)
+
+            data.append(&compressBuffer, count: DataSize.chunk-Int(stream.avail_out))
         }
-        
+
         deflateEnd(&stream)
         data.count = Int(stream.total_out)
-        
+
         return data
     }
     
